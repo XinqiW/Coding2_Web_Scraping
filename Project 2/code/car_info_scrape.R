@@ -1,0 +1,225 @@
+library(data.table)
+library(rvest)
+library(jsonlite)
+library(xml2)
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+
+# Introduction:
+# In this exercise, I would like to scrape all the descriptions for the car brand "Porsche", including all its different models
+# and trims form the website car-info.
+
+# I first tried to scrape for one specific car.
+
+my_link <- 'https://www.car-info.com/en/model/porsche/918/918/spyder-4-6hyb-at-608-hp-4wd'
+
+# Get all the specifications for one car
+
+process_one_car <- function(my_link){
+  t<- read_html(my_link)
+  data_list<- list()
+  data_list[['link']] <- my_link
+  # data_list[['car_id']] <- gsub('\\n','',trimws( t %>% html_node('.car-detail-div') %>% html_text()))
+  # data_list[['car_id']] <- gsub('\\n','',trimws(t %>% html_node('.pull-left') %>% html_text()))
+  
+  tkey <- t %>% html_nodes('.property') %>% html_text()
+  tvalue <- t %>% html_nodes('.value') %>% html_text()
+  
+  if (length(tkey) == length(tvalue)){
+    for (key_id in 1:length(tkey)){
+      print(key_id)
+      data_list[[  tkey[key_id]  ]] <- tvalue[key_id]
+    }
+  }
+  return(data_list)
+}
+
+# Check function:
+process_one_car('https://www.car-info.com/en/model/porsche/panamera/panamera-turbo-s/4-8t-v8-550hp')
+
+# View(data.frame(data_list))
+
+# df <- rbindlist(lapply(my_link, process_one_car), fill = T)
+
+############################################################################################################################
+# Next, I tried to create a function that get all the links for the car brand
+
+get_car_info <- function() {
+  
+  models_url <- "https://www.car-info.com/en/models/porsche"
+  
+  t2 <- read_html(models_url)
+  
+  type_urls <-unique( t2 %>% html_nodes(".col-md-4") %>% 
+                        html_nodes('a') %>% 
+                        html_attr('href'))
+  type_urls <- paste0('https://www.car-info.com', type_urls)
+  
+  rel_link <- 'https://www.car-info.com/en/models/porsche/911'
+  get_final_links <- function(rel_link) {
+    t <- read_html(rel_link)
+    to_full <- unique(paste0( "https://www.car-info.com", t %>% html_nodes(".background-white") %>% 
+                                html_nodes("a") %>% html_attr("href")))
+    my_full_urls <- NULL
+    for (i in to_full) {
+      # print(i)
+      list_urls <- read_html(i)
+      tep_full_link <- paste0( "https://www.car-info.com", list_urls %>% 
+                                 html_nodes(".table-striped a" ) %>% html_attr("href"))
+      my_full_urls <- c(my_full_urls, tep_full_link)
+    }
+    return(my_full_urls)
+  }
+  
+  # full_911 <- get_final_links('https://www.car-info.com/en/models/porsche/911')
+  
+  all_urls <- lapply(type_urls, get_final_links)
+  
+  # print(all_urls)
+  
+  final_all_urls <- unlist(all_urls)
+  
+  res <- lapply(final_all_urls, process_one_car)
+  res <- rbindlist(res, fill = T)
+  return(res)
+}
+
+porsche <- get_car_info()
+
+# save the raw data set 
+write.csv(porsche, file = '../Project 2/data/raw_data.csv')
+
+##################################################################################################################################
+# Clean the output data set
+
+raw_df <- read.csv(file = '../Project 2/data/raw_data.csv')
+raw_df <- separate(raw_df, Year, "-",
+                  into = c("year"))
+
+
+# Mutate all the numeric variables 
+raw_df <- mutate(raw_df, 
+                length = as.numeric(gsub("[^0-9\\.]", "", Length)),
+                width = as.numeric(gsub("[^0-9\\.]", "", Width)),
+                height = as.numeric(gsub("[^0-9\\.]", "", Height)),
+                weight = as.numeric(gsub("[^0-9\\.]", "", Weight)),
+                max_width = as.numeric(gsub("[^0-9\\.]", "", Max.width)),
+                boot_capacity = as.numeric(gsub("[^0-9\\.]", "", Boot.capacity)),
+                engine_kw = as.numeric(gsub("[^0-9\\.]", "", Engine.kw)),
+                engine_hp = as.numeric(gsub("[^0-9\\.]", "", Engine.hp)),
+                torque = as.numeric(gsub("[^0-9\\.]", "", Torque)),
+                cylinders_diameter = as.numeric(gsub("[^0-9\\.]", "", Cylinders.diameter)),
+                fuel_capacity = as.numeric(gsub("[^0-9\\.]", "", Fuel.capacity)),
+                max_speed = as.numeric(gsub("[^0-9\\.]", "", Max.speed)),
+                acceleration = as.numeric(gsub("[^0-9\\.]", "", Acceleration)),
+                fuel_town = as.numeric(gsub("[^0-9\\.]", "", Fuel.town)),
+                fuel_road = as.numeric(gsub("[^0-9\\.]", "", Fuel.road)),
+                fuel_avg = as.numeric(gsub("[^0-9\\.]", "", Fuel.average)))
+
+# Rename Variables:
+raw_df <- rename(raw_df, 
+                body_type = Body.type,
+                fuel_supply = Fuel.supply,
+                valves_in_cylinders = Valves.in.cylinders,
+                eco_standart = Eco.standart,
+                front_brakes = Front.brakes,
+                rear_brakes = Rear.brakes)
+
+
+# Replace all the '-' with NA
+raw_df <- mutate(raw_df, doors = na_if(Doors, '-'),
+                 seats = na_if(Seats, '-'),
+                 fuel_supply = na_if(fuel_supply, '-'),
+                 cylinders = na_if(Cylinders, '-'),
+                 cylinders_diameter = na_if(cylinders_diameter, '-'),
+                 valves_in_cylinders = na_if(valves_in_cylinders, '-'),
+                 gears = na_if(Gears, '-'),
+                 eco_standart = na_if(eco_standart, '-'),
+                 ABS = na_if(ABS, '-'),
+                 front_brakes = na_if(front_brakes, '-'),
+                 rear_brakes = na_if(rear_brakes, '-'),
+                 tires = na_if(Tires, '-'),
+                 wheels = na_if(Wheels, '-'),
+                 fuel_town = na_if(fuel_town, '-'))
+
+# Clean up column tires and wheels
+raw_df <- separate(raw_df, tires, " ",
+                   into = c("tires"))
+
+raw_df <- separate(raw_df, tires, ",",
+                   into = c("tires"))
+
+raw_df <- separate(raw_df, wheels, " ",
+                   into = c("wheels"))
+
+
+# Remove duplicate columns
+raw_df <- select(raw_df, -c(X,Length,Width,Height,Weight,Max.width,Boot.capacity,Engine.kw,Engine.hp,Torque,Fuel.capacity,Max.speed,
+                            Acceleration,Fuel.town,Fuel.road,Fuel.average,Tires,Wheels,Doors,Seats,Cylinders,Gears,Cylinders.diameter))
+
+clean_df <- raw_df
+
+write.csv(clean_df, file = '../Project 2/data/clean_data.csv')
+
+####################################################################################################################################
+# EDA: Create some summary statistics plots of the data set.
+# There isn't too much data analysis we can do here with the data set as most of the information are on car
+# specifications. However, I am interested to see some summary statistics of the variables in the data set.
+
+# This histogram shows the acceleration of different body types of Porsche. We can see that Porsche has 8 different
+# body types in this data set, they are the Cabrio, Coupe, Fastback, Hatchback, Roadster, SUV, Targa, and Wagon. 
+# The average acceleration time for Porsche car is around 5.2 seconds, with the fastest body type are the 
+# Cabrio, Coupe and Roadster. 
+ggplot(data = clean_df, aes(x = acceleration, fill = body_type)) + # here fill means filter
+  geom_histogram(aes(y = ..density..), alpha = 0.6) +
+  labs(x = "Acceleration (in Seconds)", y = "Relative Frequency") +
+  coord_cartesian(xlim = c(0, 13)) +
+  geom_vline(data=clean_df, aes(xintercept=mean(clean_df$acceleration,na.rm=TRUE)),
+             linetype="dashed")
+
+
+# Next, I am also curious to see what's the maximum speed of different body types of Porsche, so I did another histogram
+# that shows the average maximum speed of all body types are around 270km/h, and the body type with highest maximum
+# speed is Roadster.
+ggplot(data = clean_df, aes(x = max_speed, fill = body_type)) + # here fill means filter
+  geom_histogram(aes(y = ..density..), alpha = 0.6) +
+  labs(x = "Max Speed (km/h)", y = "Relative Frequency") +
+  coord_cartesian(xlim = c(100, 380)) +
+  geom_vline(data=clean_df, aes(xintercept=mean(clean_df$max_speed,na.rm=TRUE)),
+             linetype="dashed")
+
+# Lastly, let's also take a look at the fuel capacity of each body type. The average fuel capacity of all types is
+# around 76 liters, with the highest fuel capacity for Wagon and lowest fuel capacity for Hatchback. It's not too
+# surprised to see that Wagons and SUVs have the highest fuel capacity, while the Cabrio and Coupe have the lowest.
+ggplot(data = clean_df, aes(x = fuel_capacity, fill = body_type)) + # here fill means filter
+  geom_histogram(aes(y = ..density..), alpha = 0.6) +
+  labs(x = "Fuel Capacity (in Liters)", y = "Relative Frequency") +
+  coord_cartesian(xlim = c(40, 120)) +
+  geom_vline(data=clean_df, aes(xintercept=mean(clean_df$fuel_capacity,na.rm=TRUE)),
+             linetype="dashed")
+
+# Conclusion
+# In this exercise, I created two functions that automatically scrape all the car specifications for all the models
+# of Porsche, and then saved it as my raw data set. I later cleaned the data set with unwanted attributes of some
+# variables like special characters in numerical values, and saved as my clean data set. In the end, I also did a few
+# summery statistics graphs, which shows the average acceleration time for Porsche car is around 5.2 seconds, 
+# with the fastest body type are the Cabrio, Coupe and Roadster. In addition, the average maximum speed of all 
+# body types are around 270km/h, and the body type with highest maximum speed is Roadster. Finally, the average fuel 
+# capacity of all types is around 76 liters, with the highest fuel capacity for Wagon and lowest fuel capacity 
+# for Hatchback.
+
+# This is a very meaningful exercise because it enables the probablity of scrapping all the data from a website with
+# writing a few lines of code in R. It would be also interesting to see other car-based market websites, and scrape
+# the price information on different car models and types. This would be a great future exercise.
+
+
+
+
+
+
+
+
+
+
+
